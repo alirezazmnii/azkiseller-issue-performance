@@ -318,10 +318,10 @@
     box-shadow: var(--shadow-card);
     transition: border-color .15s, transform .1s;
   }
-  .tree-row:hover { border-color: var(--accent); }
+  .tree-row:hover { border-color: var(--accent); transform: translateY(-1px); }
   .tree-row .chevron {
     width: 14px; text-align: center; color: var(--ink-faint);
-    font-size: 11px; transition: transform .15s ease; flex-shrink: 0;
+    font-size: 11px; transition: transform .25s cubic-bezier(.4,0,.2,1); flex-shrink: 0;
   }
   .tree-row.open .chevron { transform: rotate(90deg); color: var(--accent); }
   .tree-row .leaf-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
@@ -338,10 +338,13 @@
     margin-inline-start: 24px;
     padding-inline-start: 14px;
     border-inline-start: 1.5px dashed var(--line);
-    margin-top: 6px;
-    display: none;
+    margin-top: 0;
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition: max-height .4s cubic-bezier(.4,0,.2,1), opacity .3s ease, margin-top .4s ease;
   }
-  .tree-children.open { display: block; }
+  .tree-children.open { display: block; max-height: 4000px; opacity: 1; margin-top: 6px; }
   .tree-search {
     width: 100%;
     background: var(--surface-tint);
@@ -363,12 +366,15 @@
   .tree-row.clickable-leaf:hover { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   .leaf-detail {
     margin-inline-start: 24px;
-    padding: 4px 14px 14px;
+    padding: 0 14px;
     border-inline-start: 1.5px dashed var(--line);
-    margin-top: 6px;
-    display: none;
+    margin-top: 0;
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition: max-height .4s cubic-bezier(.4,0,.2,1), opacity .3s ease, margin-top .4s ease, padding .4s ease;
   }
-  .leaf-detail.open { display: block; }
+  .leaf-detail.open { display: block; max-height: 3000px; opacity: 1; margin-top: 6px; padding: 4px 14px 14px; }
   .leaf-detail table.rows {
     border: 1px solid var(--line);
     border-radius: var(--radius);
@@ -494,8 +500,8 @@ document.querySelectorAll('.logo-text-img').forEach(img => { img.src = LOGO_TEXT
 // =====================================================================
 // تنظیمات Supabase — این دو مقدار رو از Project Settings > API بردارید
 // =====================================================================
-const SUPABASE_URL = "https://ssqqjkhzgcgojbacjitq.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNzcXFqa2h6Z2Nnb2piYWNqaXRxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk1NjczOTEsImV4cCI6MjEwNTE0MzM5MX0.0a9maOTpqGBRNs5mIVvNONXpYBauL8yjlY-O8EtsDxU";
+const SUPABASE_URL = "https://xxxx.supabase.co";
+const SUPABASE_ANON_KEY = "eyJ...";
 
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -544,6 +550,11 @@ function pad2(n) { return String(n).padStart(2, '0'); }
 // بازه‌ی جاری رو برمی‌گردونه: { startSort, endSort, label }
 // اگه روز >= ۲۱: بازه از ۲۱ همین ماه تا ۲۰ ماه بعد
 // اگه روز < ۲۱: بازه از ۲۱ ماه قبل تا ۲۰ همین ماه
+const PERSIAN_MONTHS = [
+  'فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور',
+  'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'
+];
+
 function getCurrentPeriod() {
   const [jy, jm, jd] = getTodayJalali();
   let startY, startM, endY, endM;
@@ -560,9 +571,12 @@ function getCurrentPeriod() {
 
   const startSort = String(startY * 10000 + startM * 100 + 21);
   const endSort = String(endY * 10000 + endM * 100 + 20);
-  const label = `${startY}/${pad2(startM)}/21 تا ${endY}/${pad2(endM)}/20`;
+  // بازه با نام ماه پایانی‌اش شناخته می‌شه (مثلاً بازه‌ی ۲۱ شهریور تا ۲۰ مهر = «مهر ماه»)
+  // و خودش‌به‌خود با رد شدن از ۲۱ام هر ماه، به ماه بعدی سوییچ می‌کنه
+  const monthName = PERSIAN_MONTHS[endM - 1];
+  const label = `${monthName} ماه`;
 
-  return { startSort, endSort, label };
+  return { startSort, endSort, label, monthName, startY, startM, endY, endM };
 }
 
 const CURRENT_PERIOD = getCurrentPeriod();
@@ -647,7 +661,7 @@ async function boot() {
 
   currentProfile = profile;
   renderTopbar(profile);
-  document.getElementById('period-label').textContent = `بازه‌ی جاری: ${CURRENT_PERIOD.label}`;
+  document.getElementById('period-label').textContent = `دوره‌ی جاری: ${CURRENT_PERIOD.label}`;
   loadSyncStatus();
 
   if (profile.role === 'operator') {
@@ -730,24 +744,38 @@ async function renderOperatorView(profile) {
   }
 
   content.innerHTML = `
-    <div class="panel">
-      <div class="panel-head">سابقه‌ی روزانه</div>
-      <table class="rows">
-        <tr>
-          <td style="color:var(--text-faint)">تاریخ</td>
-          <td class="num num-head">عملکرد</td>
-          <td class="num num-head">حقوق روز</td>
-        </tr>
-        ${rows.map(r => `
+    <div class="tree-node">
+      <div class="tree-row role-team_lead" id="month-card-toggle">
+        <span class="chevron">◀</span>
+        <span class="name">${CURRENT_PERIOD.label}</span>
+        <span class="spacer"></span>
+        <span class="tree-count">${formatNum(rows.length)} روز ثبت‌شده</span>
+      </div>
+      <div class="tree-children" id="month-card-detail">
+        <table class="rows">
           <tr>
-            <td>${r.report_date_jalali}</td>
-            <td class="num">${r.target_count != null ? formatNum(r.target_count) : '—'}</td>
-            <td class="num" style="color:var(--good)">${r.daily_salary != null ? formatNum(r.daily_salary) : '—'}</td>
+            <td class="num-head">تاریخ</td>
+            <td class="num num-head">عملکرد</td>
+            <td class="num num-head">حقوق روز</td>
           </tr>
-        `).join('')}
-      </table>
+          ${rows.map(r => `
+            <tr>
+              <td>${r.report_date_jalali}</td>
+              <td class="num">${r.target_count != null ? formatNum(r.target_count) : '—'}</td>
+              <td class="num" style="color:var(--good)">${r.daily_salary != null ? formatNum(r.daily_salary) : '—'}</td>
+            </tr>
+          `).join('')}
+        </table>
+      </div>
     </div>
   `;
+
+  const toggle = document.getElementById('month-card-toggle');
+  const detail = document.getElementById('month-card-detail');
+  toggle.addEventListener('click', () => {
+    toggle.classList.toggle('open');
+    detail.classList.toggle('open');
+  });
 }
 
 // ---------------------------------------------------------------
