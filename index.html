@@ -455,6 +455,7 @@
   </div>
 
   <main>
+    <div class="section-label" id="period-label" style="margin-bottom:14px"></div>
     <div class="summary-row" id="summary-row"></div>
     <div id="content-area"></div>
   </main>
@@ -498,6 +499,61 @@ const ROLE_LABELS = {
 
 // چند تا روز اخیر رو برای محاسبه‌ی جمع نشون بدیم
 const RECENT_DAYS_LIMIT = 200; // سقف تعداد رکورد دریافتی (نه روز تقویمی) — برای جلوگیری از کوئری سنگین
+
+// ---------------------------------------------------------------
+// محاسبه‌ی بازه‌ی جاری حقوق: از ۲۱ام هر ماه شمسی تا ۲۰ام ماه بعد
+// ---------------------------------------------------------------
+function gregorianToJalali(gy, gm, gd) {
+  const g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+  let jy;
+  if (gy > 1600) { jy = 979; gy -= 1600; } else { jy = 0; gy -= 621; }
+  const gy2 = (gm > 2) ? (gy + 1) : gy;
+  let days = (365 * gy) + (Math.floor((gy2 + 3) / 4)) - (Math.floor((gy2 + 99) / 100)) + (Math.floor((gy2 + 399) / 400)) - 80 + gd + g_d_m[gm - 1];
+  jy += 33 * Math.floor(days / 12053);
+  days %= 12053;
+  jy += 4 * Math.floor(days / 1461);
+  days %= 1461;
+  if (days > 365) { jy += Math.floor((days - 1) / 365); days = (days - 1) % 365; }
+  let jm, jd;
+  if (days < 186) { jm = 1 + Math.floor(days / 31); jd = 1 + (days % 31); }
+  else { jm = 7 + Math.floor((days - 186) / 30); jd = 1 + ((days - 186) % 30); }
+  return [jy, jm, jd];
+}
+
+function getTodayJalali() {
+  const now = new Date();
+  const dateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const [gy, gm, gd] = dateFmt.format(now).split('-').map(Number);
+  return gregorianToJalali(gy, gm, gd);
+}
+
+function pad2(n) { return String(n).padStart(2, '0'); }
+
+// بازه‌ی جاری رو برمی‌گردونه: { startSort, endSort, label }
+// اگه روز >= ۲۱: بازه از ۲۱ همین ماه تا ۲۰ ماه بعد
+// اگه روز < ۲۱: بازه از ۲۱ ماه قبل تا ۲۰ همین ماه
+function getCurrentPeriod() {
+  const [jy, jm, jd] = getTodayJalali();
+  let startY, startM, endY, endM;
+
+  if (jd >= 21) {
+    startY = jy; startM = jm;
+    endM = jm + 1; endY = jy;
+    if (endM > 12) { endM = 1; endY = jy + 1; }
+  } else {
+    endY = jy; endM = jm;
+    startM = jm - 1; startY = jy;
+    if (startM < 1) { startM = 12; startY = jy - 1; }
+  }
+
+  const startSort = String(startY * 10000 + startM * 100 + 21);
+  const endSort = String(endY * 10000 + endM * 100 + 20);
+  const label = `${startY}/${pad2(startM)}/21 تا ${endY}/${pad2(endM)}/20`;
+
+  return { startSort, endSort, label };
+}
+
+const CURRENT_PERIOD = getCurrentPeriod();
 
 let currentProfile = null;      // پروفایل کاربر لاگین‌کرده
 let visibleProfiles = [];       // خودش + همه‌ی زیردست‌هایی که RLS اجازه میده ببینه
@@ -579,6 +635,7 @@ async function boot() {
 
   currentProfile = profile;
   renderTopbar(profile);
+  document.getElementById('period-label').textContent = `بازه‌ی جاری: ${CURRENT_PERIOD.label}`;
   loadSyncStatus();
 
   if (profile.role === 'operator') {
@@ -618,6 +675,8 @@ async function renderOperatorView(profile) {
     .from('daily_targets')
     .select('report_date_jalali, report_date_sort, target_count, daily_salary')
     .eq('operator_id', profile.id)
+    .gte('report_date_sort', CURRENT_PERIOD.startSort)
+    .lte('report_date_sort', CURRENT_PERIOD.endSort)
     .order('report_date_sort', { ascending: false })
     .limit(RECENT_DAYS_LIMIT);
 
@@ -710,6 +769,8 @@ async function renderManagerialView(profile) {
   const { data: targets, error: targetsError } = await supabaseClient
     .from('daily_targets')
     .select('operator_id, report_date_jalali, report_date_sort, target_count, daily_salary')
+    .gte('report_date_sort', CURRENT_PERIOD.startSort)
+    .lte('report_date_sort', CURRENT_PERIOD.endSort)
     .order('report_date_sort', { ascending: false })
     .limit(5000);
 
